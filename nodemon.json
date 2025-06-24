@@ -1,0 +1,47 @@
+{
+  "watch": [
+    "src/",
+    "server.js",
+    ".env"
+  ],
+  "ignore": [
+    "node_modules/",
+    "data/",
+    "logs/",
+    "*.log",
+    "*.mjr",
+    "*.opus",
+    "*.mp3",
+    "*.mp4",
+    "*.m4a",
+    "*.wav",
+    "*.json",
+    "*.tmp",
+    "*.temp",
+    ".git/",
+    "coverage/",
+    "dist/",
+    "build/",
+    "uploads/",
+    "temp/",
+    "cache/"
+  ],
+  "ext": "js,ts,json",
+  "delay": 2500,
+  "env": {
+    "NODE_ENV": "development"
+  },
+  "verbose": true,
+  "restartable": "rs",
+  "colours": true,
+  "legacyWatch": false,
+  "pollingInterval": 100,
+  "runOnChangeOnly": false,
+  "signal": "SIGTERM",
+  "stdout": true,
+  "events": {
+    "restart": "echo '🔄 Nodemon restarted due to code changes'",
+    "crash": "echo '💥 Nodemon crashed - check your code'",
+    "start": "echo '🚀 Nodemon started successfully'"
+  }
+}

@@ -1,0 +1,48 @@
+networks:
+  radio-network:
+    driver: bridge
+
+volumes:
+  radio_incoming:
+    driver: local
+  radio_reencoded:
+    driver: local
+  radio_metadata:
+    driver: local
+  radio_logs:
+    driver: local
+
+services:
+  radio-station:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime  # Added back for multi-stage build
+    container_name: radio-station
+    restart: unless-stopped
+    networks:
+      - radio-network
+    volumes:
+      - radio_incoming:/app/data/incoming
+      - radio_reencoded:/app/data/reencoded
+      - radio_metadata:/app/data/metadata
+      - radio_logs:/app/data/logs
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - INCOMING_DIR=/app/data/incoming
+      - REENCODED_DIR=/app/data/reencoded
+      - METADATA_DIR=/app/data/metadata
+      - LOGS_DIR=/app/data/logs
+      - LOG_LEVEL=debug
+      - MAX_CONCURRENT_ENCODING=2
+      - EXTERNAL_JANUS_IP=${EXTERNAL_JANUS_IP:-localhost}
+      - EXTERNAL_JANUS_PORT=${EXTERNAL_JANUS_PORT:-8088}
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
