@@ -146,8 +146,8 @@ export class FileService {
   /**
    * NEW: Manual import files from directory
    */
-  importFiles(): Observable<{ success: boolean; message: string; results: any }> {
-    return this.http.post<{ success: boolean; message: string; results: any }>(`${this.apiUrl}/import`, {}).pipe(
+  importFiles(directoryType: string = 'incoming'): Observable<{ success: boolean; message: string; results: any }> {
+    return this.http.post<{ success: boolean; message: string; results: any }>(`${this.apiUrl}/import`, { directoryType }).pipe(
       tap(response => {
         if (response.success) {
           this.refreshFiles();

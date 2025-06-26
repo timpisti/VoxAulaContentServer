@@ -1,4 +1,4 @@
-// src/services/FileImportService.js - Directory monitoring and file import service
+// src/services/FileImportService.js - EXTENDED: Directory monitoring for both incoming and reencoded
 const fs = require('fs-extra');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
@@ -13,13 +13,22 @@ class FileImportService {
     
     // Configuration
     this.incomingDir = process.env.INCOMING_DIR || './data/incoming';
-    this.monitoringInterval = null;
+    this.reencodedDir = process.env.REENCODED_DIR || './data/reencoded';
+    
+    // Monitoring intervals
+    this.incomingMonitoringInterval = null;
+    this.reencodedMonitoringInterval = null;
+    
+    // Status flags
     this.autoImportEnabled = false;
     this.autoEncodingEnabled = false;
-    this.isMonitoring = false;
+    this.autoImportReencodedEnabled = false;
+    this.isMonitoringIncoming = false;
+    this.isMonitoringReencoded = false;
     
     // Supported file extensions
-    this.supportedExtensions = ['.mp3', '.mp4', '.m4a'];
+    this.incomingSupportedExtensions = ['.mp3', '.mp4', '.m4a'];
+    this.reencodedSupportedExtensions = ['.opus', '.ogg', '.mp3']; // Encoded formats
     
     logger.info('FileImportService initialized');
   }
@@ -34,16 +43,23 @@ class FileImportService {
       
       this.autoImportEnabled = config.autoImportEnabled || false;
       this.autoEncodingEnabled = config.autoEncodingEnabled || false;
+      this.autoImportReencodedEnabled = config.autoImportReencodedEnabled || false;
       
       // Start monitoring if auto-import is enabled
       if (this.autoImportEnabled) {
-        await this.startMonitoring();
+        await this.startIncomingMonitoring();
+      }
+      
+      if (this.autoImportReencodedEnabled) {
+        await this.startReencodedMonitoring();
       }
       
       logger.info('FileImportService initialized with config:', {
         autoImport: this.autoImportEnabled,
         autoEncoding: this.autoEncodingEnabled,
-        monitoringInterval: config.monitoringInterval || 3600000
+        autoImportReencoded: this.autoImportReencodedEnabled,
+        incomingInterval: config.monitoringInterval || 3600000,
+        reencodedInterval: config.reencodedMonitoringInterval || 3600000
       });
       
     } catch (error) {
@@ -52,24 +68,44 @@ class FileImportService {
   }
 
   /**
-   * Manually scan and import files from directory
+   * Manually scan and import files from incoming directory
    */
-  async scanAndImport() {
+  async scanAndImportIncoming() {
+    return await this.scanAndImportFromDirectory('incoming');
+  }
+
+  /**
+   * Manually scan and import files from reencoded directory
+   */
+  async scanAndImportReencoded() {
+    return await this.scanAndImportFromDirectory('reencoded');
+  }
+
+  /**
+   * Generic scan and import from specified directory type
+   */
+  async scanAndImportFromDirectory(directoryType) {
     try {
-      logger.info('Starting manual directory scan and import');
+      const isIncoming = directoryType === 'incoming';
+      const targetDir = isIncoming ? this.incomingDir : this.reencodedDir;
+      const supportedExtensions = isIncoming ? this.incomingSupportedExtensions : this.reencodedSupportedExtensions;
+      const logPrefix = isIncoming ? 'incoming' : 'reencoded';
       
-      if (!await fs.pathExists(this.incomingDir)) {
-        throw new Error(`Incoming directory does not exist: ${this.incomingDir}`);
+      logger.info(`Starting manual ${logPrefix} directory scan and import`);
+      
+      if (!await fs.pathExists(targetDir)) {
+        throw new Error(`${logPrefix} directory does not exist: ${targetDir}`);
       }
 
-      const files = await fs.readdir(this.incomingDir);
+      const files = await fs.readdir(targetDir);
       const audioFiles = files.filter(file => 
-        this.supportedExtensions.includes(path.extname(file).toLowerCase())
+        supportedExtensions.includes(path.extname(file).toLowerCase())
       );
 
-      logger.info(`Found ${audioFiles.length} audio files to process`);
+      logger.info(`Found ${audioFiles.length} audio files to process in ${logPrefix} directory`);
 
       const results = {
+        directoryType,
         total: audioFiles.length,
         imported: 0,
         skipped: 0,
@@ -79,7 +115,7 @@ class FileImportService {
 
       for (const fileName of audioFiles) {
         try {
-          const result = await this.importSingleFile(fileName);
+          const result = await this.importSingleFile(fileName, directoryType);
           if (result.imported) {
             results.imported++;
             results.files.push({
@@ -102,19 +138,19 @@ class FileImportService {
             status: 'error',
             error: error.message
           });
-          logger.error(`Failed to import file ${fileName}:`, error);
+          logger.error(`Failed to import file ${fileName} from ${logPrefix}:`, error);
         }
       }
 
-      logger.info('Manual import completed:', {
+      logger.info(`Manual ${logPrefix} import completed:`, {
         total: results.total,
         imported: results.imported,
         skipped: results.skipped,
         errors: results.errors
       });
 
-      // Trigger auto-encoding if enabled
-      if (this.autoEncodingEnabled && results.imported > 0) {
+      // Trigger auto-encoding if enabled and importing from incoming
+      if (isIncoming && this.autoEncodingEnabled && results.imported > 0) {
         setTimeout(() => {
           this.triggerAutoEncoding();
         }, 1000);
@@ -123,16 +159,18 @@ class FileImportService {
       return results;
 
     } catch (error) {
-      logger.error('Manual scan and import failed:', error);
+      logger.error(`Manual scan and import failed for ${directoryType}:`, error);
       throw error;
     }
   }
 
   /**
-   * Import a single file from the directory
+   * Import a single file from specified directory type
    */
-  async importSingleFile(fileName) {
-    const filePath = path.join(this.incomingDir, fileName);
+  async importSingleFile(fileName, directoryType) {
+    const isIncoming = directoryType === 'incoming';
+    const targetDir = isIncoming ? this.incomingDir : this.reencodedDir;
+    const filePath = path.join(targetDir, fileName);
     
     try {
       // Check if file exists and get stats
@@ -150,19 +188,21 @@ class FileImportService {
       // Generate unique file ID
       const fileId = uuidv4();
       
-      // Create file record
+      // Create file record with appropriate status
       const fileRecord = {
         id: fileId,
         originalName: fileName,
         fileName: fileName, // Keep original name for imported files
         originalPath: filePath,
+        encodedPath: isIncoming ? null : filePath, // For reencoded, set encodedPath
         size: stats.size,
-        mimeType: this.getMimeType(fileName),
+        mimeType: this.getMimeType(fileName, directoryType),
         uploadDate: new Date().toISOString(),
-        status: 'uploaded',
-        progress: 0,
+        status: isIncoming ? 'uploaded' : 'completed', // Different status based on directory
+        progress: isIncoming ? 0 : 100,
         imported: true, // Mark as imported
-        importDate: new Date().toISOString()
+        importDate: new Date().toISOString(),
+        importSource: directoryType // Track where it was imported from
       };
 
       // Add to database
@@ -171,16 +211,17 @@ class FileImportService {
       // Try to extract metadata (non-blocking)
       this.extractMetadataAsync(savedFile);
 
-      logger.info('File imported successfully:', {
+      logger.info(`File imported successfully from ${directoryType}:`, {
         fileName,
         fileId,
-        size: stats.size
+        size: stats.size,
+        status: fileRecord.status
       });
 
       return { imported: true, fileId };
 
     } catch (error) {
-      logger.error(`Failed to import file ${fileName}:`, error);
+      logger.error(`Failed to import file ${fileName} from ${directoryType}:`, error);
       throw error;
     }
   }
@@ -219,11 +260,11 @@ class FileImportService {
   }
 
   /**
-   * Start directory monitoring
+   * Start incoming directory monitoring
    */
-  async startMonitoring() {
-    if (this.isMonitoring) {
-      logger.warn('Directory monitoring already active');
+  async startIncomingMonitoring() {
+    if (this.isMonitoringIncoming) {
+      logger.warn('Incoming directory monitoring already active');
       return;
     }
 
@@ -231,54 +272,109 @@ class FileImportService {
       const config = await this.metadataService.getImportConfig();
       const interval = config.monitoringInterval || 3600000; // Default: 1 hour
 
-      this.monitoringInterval = setInterval(async () => {
+      this.incomingMonitoringInterval = setInterval(async () => {
         try {
-          logger.debug('Performing scheduled directory scan');
-          const results = await this.scanAndImport();
+          logger.debug('Performing scheduled incoming directory scan');
+          const results = await this.scanAndImportIncoming();
           
           if (results.imported > 0) {
-            logger.info(`Scheduled scan imported ${results.imported} new files`);
+            logger.info(`Scheduled incoming scan imported ${results.imported} new files`);
             
             // Emit to frontend
             this.io.emit('files-auto-imported', {
+              directoryType: 'incoming',
               imported: results.imported,
               timestamp: new Date().toISOString()
             });
           }
         } catch (error) {
-          logger.error('Scheduled directory scan failed:', error);
+          logger.error('Scheduled incoming directory scan failed:', error);
         }
       }, interval);
 
-      this.isMonitoring = true;
+      this.isMonitoringIncoming = true;
       this.autoImportEnabled = true;
 
-      logger.info('Directory monitoring started', { interval });
+      logger.info('Incoming directory monitoring started', { interval });
 
     } catch (error) {
-      logger.error('Failed to start directory monitoring:', error);
+      logger.error('Failed to start incoming directory monitoring:', error);
       throw error;
     }
   }
 
   /**
-   * Stop directory monitoring
+   * Start reencoded directory monitoring
    */
-  async stopMonitoring() {
-    if (this.monitoringInterval) {
-      clearInterval(this.monitoringInterval);
-      this.monitoringInterval = null;
+  async startReencodedMonitoring() {
+    if (this.isMonitoringReencoded) {
+      logger.warn('Reencoded directory monitoring already active');
+      return;
     }
 
-    this.isMonitoring = false;
+    try {
+      const config = await this.metadataService.getImportConfig();
+      const interval = config.reencodedMonitoringInterval || 3600000; // Default: 1 hour
+
+      this.reencodedMonitoringInterval = setInterval(async () => {
+        try {
+          logger.debug('Performing scheduled reencoded directory scan');
+          const results = await this.scanAndImportReencoded();
+          
+          if (results.imported > 0) {
+            logger.info(`Scheduled reencoded scan imported ${results.imported} new files`);
+            
+            // Emit to frontend
+            this.io.emit('files-auto-imported', {
+              directoryType: 'reencoded',
+              imported: results.imported,
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch (error) {
+          logger.error('Scheduled reencoded directory scan failed:', error);
+        }
+      }, interval);
+
+      this.isMonitoringReencoded = true;
+      this.autoImportReencodedEnabled = true;
+
+      logger.info('Reencoded directory monitoring started', { interval });
+
+    } catch (error) {
+      logger.error('Failed to start reencoded directory monitoring:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Stop incoming directory monitoring
+   */
+  async stopIncomingMonitoring() {
+    if (this.incomingMonitoringInterval) {
+      clearInterval(this.incomingMonitoringInterval);
+      this.incomingMonitoringInterval = null;
+    }
+
+    this.isMonitoringIncoming = false;
     this.autoImportEnabled = false;
 
-    // Save state to database
-    await this.metadataService.updateImportConfig({
-      autoImportEnabled: false
-    });
+    logger.info('Incoming directory monitoring stopped');
+  }
 
-    logger.info('Directory monitoring stopped');
+  /**
+   * Stop reencoded directory monitoring
+   */
+  async stopReencodedMonitoring() {
+    if (this.reencodedMonitoringInterval) {
+      clearInterval(this.reencodedMonitoringInterval);
+      this.reencodedMonitoringInterval = null;
+    }
+
+    this.isMonitoringReencoded = false;
+    this.autoImportReencodedEnabled = false;
+
+    logger.info('Reencoded directory monitoring stopped');
   }
 
   /**
@@ -289,12 +385,21 @@ class FileImportService {
       // Update database
       await this.metadataService.updateImportConfig(config);
       
-      // Apply changes
+      // Apply changes for incoming monitoring
       if (config.hasOwnProperty('autoImportEnabled')) {
-        if (config.autoImportEnabled && !this.isMonitoring) {
-          await this.startMonitoring();
-        } else if (!config.autoImportEnabled && this.isMonitoring) {
-          await this.stopMonitoring();
+        if (config.autoImportEnabled && !this.isMonitoringIncoming) {
+          await this.startIncomingMonitoring();
+        } else if (!config.autoImportEnabled && this.isMonitoringIncoming) {
+          await this.stopIncomingMonitoring();
+        }
+      }
+
+      // Apply changes for reencoded monitoring
+      if (config.hasOwnProperty('autoImportReencodedEnabled')) {
+        if (config.autoImportReencodedEnabled && !this.isMonitoringReencoded) {
+          await this.startReencodedMonitoring();
+        } else if (!config.autoImportReencodedEnabled && this.isMonitoringReencoded) {
+          await this.stopReencodedMonitoring();
         }
       }
 
@@ -302,10 +407,15 @@ class FileImportService {
         this.autoEncodingEnabled = config.autoEncodingEnabled;
       }
 
-      if (config.hasOwnProperty('monitoringInterval') && this.isMonitoring) {
-        // Restart monitoring with new interval
-        await this.stopMonitoring();
-        await this.startMonitoring();
+      // Restart monitoring with new intervals if changed
+      if (config.hasOwnProperty('monitoringInterval') && this.isMonitoringIncoming) {
+        await this.stopIncomingMonitoring();
+        await this.startIncomingMonitoring();
+      }
+
+      if (config.hasOwnProperty('reencodedMonitoringInterval') && this.isMonitoringReencoded) {
+        await this.stopReencodedMonitoring();
+        await this.startReencodedMonitoring();
       }
 
       logger.info('Import configuration updated:', config);
@@ -421,15 +531,27 @@ class FileImportService {
   }
 
   /**
-   * Get MIME type from file extension
+   * Get MIME type from file extension and directory type
    */
-  getMimeType(fileName) {
+  getMimeType(fileName, directoryType) {
     const ext = path.extname(fileName).toLowerCase();
-    switch (ext) {
-      case '.mp3': return 'audio/mpeg';
-      case '.mp4': return 'audio/mp4';
-      case '.m4a': return 'audio/x-m4a';
-      default: return 'audio/mpeg';
+    const isIncoming = directoryType === 'incoming';
+    
+    if (isIncoming) {
+      switch (ext) {
+        case '.mp3': return 'audio/mpeg';
+        case '.mp4': return 'audio/mp4';
+        case '.m4a': return 'audio/x-m4a';
+        default: return 'audio/mpeg';
+      }
+    } else {
+      // Reencoded directory
+      switch (ext) {
+        case '.opus': return 'audio/opus';
+        case '.ogg': return 'audio/ogg';
+        case '.mp3': return 'audio/mpeg';
+        default: return 'audio/opus';
+      }
     }
   }
 
@@ -438,10 +560,17 @@ class FileImportService {
    */
   getStatus() {
     return {
-      monitoring: this.isMonitoring,
-      autoImportEnabled: this.autoImportEnabled,
-      autoEncodingEnabled: this.autoEncodingEnabled,
-      incomingDir: this.incomingDir
+      incoming: {
+        monitoring: this.isMonitoringIncoming,
+        autoImportEnabled: this.autoImportEnabled,
+        directory: this.incomingDir
+      },
+      reencoded: {
+        monitoring: this.isMonitoringReencoded,
+        autoImportEnabled: this.autoImportReencodedEnabled,
+        directory: this.reencodedDir
+      },
+      autoEncodingEnabled: this.autoEncodingEnabled
     };
   }
 
@@ -451,12 +580,18 @@ class FileImportService {
   async cleanup() {
     logger.info('Cleaning up FileImportService');
     
-    if (this.monitoringInterval) {
-      clearInterval(this.monitoringInterval);
-      this.monitoringInterval = null;
+    if (this.incomingMonitoringInterval) {
+      clearInterval(this.incomingMonitoringInterval);
+      this.incomingMonitoringInterval = null;
     }
     
-    this.isMonitoring = false;
+    if (this.reencodedMonitoringInterval) {
+      clearInterval(this.reencodedMonitoringInterval);
+      this.reencodedMonitoringInterval = null;
+    }
+    
+    this.isMonitoringIncoming = false;
+    this.isMonitoringReencoded = false;
     
     logger.info('FileImportService cleanup completed');
   }

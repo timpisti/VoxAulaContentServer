@@ -18,7 +18,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: runtime  # Added back for multi-stage build
-    container_name: radio-station
+    container_name: radio-station-${HOST_PORT:-3000}
     restart: unless-stopped
     networks:
       - radio-network
@@ -39,7 +39,7 @@ services:
       - EXTERNAL_JANUS_IP=${EXTERNAL_JANUS_IP:-localhost}
       - EXTERNAL_JANUS_PORT=${EXTERNAL_JANUS_PORT:-8088}
     ports:
-      - "3000:3000"
+      - "${HOST_PORT:-3000}:3000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s

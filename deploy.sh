@@ -13,7 +13,19 @@ NC='\033[0m' # No Color
 # Configuration
 PROJECT_NAME="radio-station"
 ENV=${1:-development}
-CONTAINER_NAME="radio-station"
+
+# Get host port and set dynamic container name
+get_host_port() {
+    if [ -f .env ]; then
+        HOST_PORT=$(grep "^HOST_PORT=" .env | cut -d '=' -f2 | tr -d '"' | tr -d "'")
+    fi
+    # Default to 3000 if not set
+    HOST_PORT=${HOST_PORT:-3000}
+    echo $HOST_PORT
+}
+
+HOST_PORT=$(get_host_port)
+CONTAINER_NAME="radio-station-${HOST_PORT}"
 
 # Functions
 log_info() {
@@ -84,6 +96,8 @@ create_production_dirs() {
 # Build and deploy
 deploy() {
     log_info "Starting deployment for environment: $ENV"
+    log_info "Using host port: $HOST_PORT"
+    log_info "Container name: $CONTAINER_NAME"
     
     # Preparation
     check_docker
@@ -93,11 +107,11 @@ deploy() {
     # Choose compose file
     if [ "$ENV" = "production" ]; then
         COMPOSE_FILES="-f docker-compose.yml -f docker-compose.prod.yml"
-        ACCESS_URL="http://localhost"
+        ACCESS_URL="http://localhost:${HOST_PORT}"
         log_info "Using production configuration"
     else
         COMPOSE_FILES="-f docker-compose.yml"
-        ACCESS_URL="http://localhost:3000"
+        ACCESS_URL="http://localhost:${HOST_PORT}"
         log_info "Using development configuration"
     fi
     
@@ -118,9 +132,9 @@ deploy() {
     log_info "Performing health check..."
     
     if [ "$ENV" = "production" ]; then
-        HEALTH_URL="http://localhost/api/health"
+        HEALTH_URL="http://localhost:${HOST_PORT}/api/health"
     else
-        HEALTH_URL="http://localhost:3000/api/health"
+        HEALTH_URL="http://localhost:${HOST_PORT}/api/health"
     fi
     
     # Try health check multiple times

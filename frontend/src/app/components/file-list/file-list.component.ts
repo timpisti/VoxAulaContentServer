@@ -397,11 +397,14 @@ export class FileListComponent implements OnInit, OnDestroy {
   
   // Import & Encoding Controls
   importLoading = false;
+  importReencodedLoading = false;
   batchEncodingLoading = false;
   configLoading = false;
   autoImportEnabled = false;
   autoEncodingEnabled = false;
+  autoImportReencodedEnabled = false;
   monitoringIntervalHours = 1;
+  reencodedMonitoringIntervalHours = 1;
   importStatus: any = null;
   
   // Statistics

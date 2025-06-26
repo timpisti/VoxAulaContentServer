@@ -401,12 +401,24 @@ router.post('/import', async (req, res) => {
       });
     }
 
-    logger.info('Manual file import requested');
-    const results = await fileImportService.scanAndImport();
+    const { directoryType = 'incoming' } = req.body;
+    
+    if (!['incoming', 'reencoded'].includes(directoryType)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid directory type. Must be "incoming" or "reencoded"'
+      });
+    }
+
+    logger.info(`Manual file import requested for ${directoryType} directory`);
+    
+    const results = directoryType === 'incoming' 
+      ? await fileImportService.scanAndImportIncoming()
+      : await fileImportService.scanAndImportReencoded();
     
     res.json({
       success: true,
-      message: `Import completed: ${results.imported} files imported, ${results.skipped} skipped, ${results.errors} errors`,
+      message: `Import completed from ${directoryType}: ${results.imported} files imported, ${results.skipped} skipped, ${results.errors} errors`,
       results
     });
 

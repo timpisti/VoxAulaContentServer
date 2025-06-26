@@ -42,12 +42,12 @@ class MetadataService {
       // Radio configuration with correct defaults
       radioConfig: {
         // Legacy RTP fields (kept for backward compatibility)
-        targetIP: '', //VoxAula server port
+        targetIP: '185.80.51.95',
         targetPort: '8088',
         // Janus AudioBridge configuration with correct defaults
-        janusIP: '', //VoxAula server port
+        janusIP: '185.80.51.95',
         janusPort: '8088',
-        janusRoomId: '', //RoomID
+        janusRoomId: '3183360752998701',
         janusParticipantName: 'RadioStation',
         janusRoomSecret: '',
         janusRoomPin: '',
@@ -59,7 +59,9 @@ class MetadataService {
       importConfig: {
         autoImportEnabled: false,
         autoEncodingEnabled: false,
+        autoImportReencodedEnabled: false, // NEW: For reencoded directory
         monitoringInterval: 3600000, // 1 hour in milliseconds
+        reencodedMonitoringInterval: 3600000, // 1 hour in milliseconds
         updatedAt: null
       },
       // Active encoding jobs persistence
@@ -130,12 +132,12 @@ class MetadataService {
     if (!this.data.radioConfig) {
       this.data.radioConfig = {
         // Legacy RTP fields
-        targetIP: '',
+        targetIP: '185.80.51.95',
         targetPort: '8088',
         // Janus configuration with correct defaults
-        janusIP: '',
+        janusIP: '185.80.51.95',
         janusPort: '8088',
-        janusRoomId: '',
+        janusRoomId: '3183360752998701',
         janusParticipantName: 'RadioStation',
         janusRoomSecret: '',
         janusRoomPin: '',
@@ -148,9 +150,9 @@ class MetadataService {
     } else {
       // Update existing config with new defaults if fields are missing
       const defaultConfig = {
-        janusIP: '',
+        janusIP: '185.80.51.95',
         janusPort: '8088',
-        janusRoomId: '',
+        janusRoomId: '3183360752998701',
         janusParticipantName: 'RadioStation',
         janusRoomSecret: '',
         janusRoomPin: '',
@@ -178,11 +180,28 @@ class MetadataService {
       this.data.importConfig = {
         autoImportEnabled: false,
         autoEncodingEnabled: false,
+        autoImportReencodedEnabled: false, // NEW: For reencoded directory
         monitoringInterval: 3600000, // 1 hour
+        reencodedMonitoringInterval: 3600000, // 1 hour
         updatedAt: new Date().toISOString()
       };
       needsWrite = true;
       logger.info('Added import configuration to database');
+    } else {
+      // Update existing config with new defaults if fields are missing
+      if (!this.data.importConfig.hasOwnProperty('autoImportReencodedEnabled')) {
+        this.data.importConfig.autoImportReencodedEnabled = false;
+        needsWrite = true;
+      }
+      if (!this.data.importConfig.hasOwnProperty('reencodedMonitoringInterval')) {
+        this.data.importConfig.reencodedMonitoringInterval = 3600000;
+        needsWrite = true;
+      }
+      
+      if (needsWrite) {
+        this.data.importConfig.updatedAt = new Date().toISOString();
+        logger.info('Updated import configuration with reencoded directory support');
+      }
     }
     
     // Version migration
