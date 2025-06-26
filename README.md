@@ -1,6 +1,6 @@
 # VoxAula Radio Station Service
 
-A modern, containerized webradio podcast station streaming service built with Node.js and Angular. This application provides automated audio file processing, real-time streaming to VoxAula.com, and a comprehensive web-based administration interface.
+A modern, containerized webradio podcast station streaming service built with Node.js and Angular. This application provides automated audio file processing, real-time streaming to VoxAula.com, and a comprehensive web-based administration interface. This docker image can run parallely multiple instances in same server to be able to handle multiple shows.
 
 ## 🎵 Features
 
