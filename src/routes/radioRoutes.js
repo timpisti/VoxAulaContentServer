@@ -319,9 +319,9 @@ router.get('/config', async (req, res) => {
     res.json({
       success: true,
       config: {
-        janusIP: config?.janusIP || '',
+        janusIP: config?.janusIP || '185.80.51.95',
         janusPort: config?.janusPort || '8088',
-        janusRoomId: config?.janusRoomId || '',
+        janusRoomId: config?.janusRoomId || '3183360752998701',
         janusParticipantName: config?.janusParticipantName || 'RadioStation',
         janusRoomSecret: config?.janusRoomSecret || '',
         janusRoomPin: config?.janusRoomPin || '',

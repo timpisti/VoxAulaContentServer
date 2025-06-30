@@ -1,0 +1,66 @@
+# .dockerignore for Single Container
+
+# Node.js
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Data directories (will be mounted as volumes)
+data/
+logs/
+uploads/
+temp/
+cache/
+
+# Frontend build output (will be rebuilt in container)
+frontend/dist/
+frontend/node_modules/
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Development
+.env.local
+.env.development
+.env.test
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+.nyc_output
+
+# Build artifacts
+dist/
+build/
+public/
+
+# Media files
+*.tmp
+*.temp
+*.mjr
+*.opus
+*.mp3
+*.mp4
+*.m4a
+*.wav
+
+# Documentation
+README*.md
+docs/

@@ -148,7 +148,7 @@ class JanusService {
   async establishSession() {
     try {
       const config = await this.metadataService.getRadioConfig();
-      this.baseUrl = `http://${config.janusIP || ''}:${config.janusPort || '8088'}/janus`;
+      this.baseUrl = `http://${config.janusIP || '185.80.51.95'}:${config.janusPort || '8088'}/janus`;
       
       logger.info('Establishing Janus session...', { baseUrl: this.baseUrl });
 
@@ -248,7 +248,7 @@ class JanusService {
    */
   async joinRoom(config) {
     try {
-      const roomId = parseInt(config.janusRoomId || '');
+      const roomId = parseInt(config.janusRoomId || '3183360752998701');
       const ssrc = this.generateSSRC();
       const transactionId = this.generateTransactionId();
       
@@ -312,7 +312,7 @@ class JanusService {
           
           // For RTP participants, extract connection details
           this.rtpDetails = {
-            ip: config.janusIP || '',
+            ip: config.janusIP || '185.80.51.95',
             port: pluginData.rtp?.port || 50000, // Port from Janus
             ssrc: ssrc // Our generated SSRC
           };
@@ -338,7 +338,7 @@ class JanusService {
         if (pluginData?.audiobridge === 'joined') {
           this.participantId = pluginData.id;
           this.rtpDetails = {
-            ip: config.janusIP || '',
+            ip: config.janusIP || '185.80.51.95',
             port: pluginData.rtp?.port || 50000,
             ssrc: ssrc
           };

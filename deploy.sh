@@ -26,6 +26,7 @@ get_host_port() {
 
 HOST_PORT=$(get_host_port)
 CONTAINER_NAME="radio-station-${HOST_PORT}"
+PROJECT_NAME="radio-station-${HOST_PORT}"
 
 # Functions
 log_info() {
@@ -98,6 +99,7 @@ deploy() {
     log_info "Starting deployment for environment: $ENV"
     log_info "Using host port: $HOST_PORT"
     log_info "Container name: $CONTAINER_NAME"
+    log_info "Project name: $PROJECT_NAME"
     
     # Preparation
     check_docker
@@ -117,12 +119,12 @@ deploy() {
     
     # Stop existing container if running
     log_info "Stopping existing container..."
-    docker-compose $COMPOSE_FILES down 2>/dev/null || true
+    docker-compose -p $PROJECT_NAME $COMPOSE_FILES down 2>/dev/null || true
     
     # Build and start
     log_info "Building and starting container..."
-    docker-compose $COMPOSE_FILES build --no-cache
-    docker-compose $COMPOSE_FILES up -d
+    docker-compose -p $PROJECT_NAME $COMPOSE_FILES build --no-cache
+    docker-compose -p $PROJECT_NAME $COMPOSE_FILES up -d
     
     # Wait for service to be ready
     log_info "Waiting for service to be ready..."
@@ -161,7 +163,7 @@ deploy() {
     # Show container status
     echo ""
     log_info "Container status:"
-    docker-compose $COMPOSE_FILES ps
+    docker-compose -p $PROJECT_NAME $COMPOSE_FILES ps
 }
 
 # Stop service
@@ -174,7 +176,7 @@ stop() {
         COMPOSE_FILES="-f docker-compose.yml"
     fi
     
-    docker-compose $COMPOSE_FILES down
+    docker-compose -p $PROJECT_NAME $COMPOSE_FILES down
     log_success "Services stopped"
 }
 
@@ -189,9 +191,9 @@ logs() {
     fi
     
     if [ "$FOLLOW" = "follow" ] || [ "$FOLLOW" = "-f" ]; then
-        docker-compose $COMPOSE_FILES logs -f $CONTAINER_NAME
+        docker-compose -p $PROJECT_NAME $COMPOSE_FILES logs -f $CONTAINER_NAME
     else
-        docker-compose $COMPOSE_FILES logs --tail=50 $CONTAINER_NAME
+        docker-compose -p $PROJECT_NAME $COMPOSE_FILES logs --tail=50 $CONTAINER_NAME
     fi
 }
 
@@ -211,8 +213,8 @@ backup() {
     mkdir -p "$BACKUP_DIR"
     
     # Backup volumes
-    docker run --rm -v radio_metadata:/source -v $(pwd)/$BACKUP_DIR:/backup alpine tar czf /backup/metadata.tar.gz -C /source .
-    docker run --rm -v radio_logs:/source -v $(pwd)/$BACKUP_DIR:/backup alpine tar czf /backup/logs.tar.gz -C /source .
+    docker run --rm -v radio-station-${HOST_PORT}_radio_metadata:/source -v $(pwd)/$BACKUP_DIR:/backup alpine tar czf /backup/metadata.tar.gz -C /source .
+    docker run --rm -v radio-station-${HOST_PORT}_radio_logs:/source -v $(pwd)/$BACKUP_DIR:/backup alpine tar czf /backup/logs.tar.gz -C /source .
     
     log_success "Backup created at: $BACKUP_DIR"
 }
@@ -227,7 +229,7 @@ status() {
         COMPOSE_FILES="-f docker-compose.yml"
     fi
     
-    docker-compose $COMPOSE_FILES ps
+    docker-compose -p $PROJECT_NAME $COMPOSE_FILES ps
     
     echo ""
     log_info "Container resource usage:"
@@ -235,7 +237,7 @@ status() {
     
     echo ""
     log_info "Volume information:"
-    docker volume ls | grep radio_ || log_warning "No radio volumes found"
+    docker volume ls | grep radio-station-${HOST_PORT}_ || log_warning "No radio volumes found for port ${HOST_PORT}"
 }
 
 # Access container shell

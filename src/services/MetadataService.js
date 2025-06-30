@@ -42,12 +42,12 @@ class MetadataService {
       // Radio configuration with correct defaults
       radioConfig: {
         // Legacy RTP fields (kept for backward compatibility)
-        targetIP: '',
+        targetIP: '185.80.51.95',
         targetPort: '8088',
         // Janus AudioBridge configuration with correct defaults
-        janusIP: '',
+        janusIP: '185.80.51.95',
         janusPort: '8088',
-        janusRoomId: '',
+        janusRoomId: '3183360752998701',
         janusParticipantName: 'RadioStation',
         janusRoomSecret: '',
         janusRoomPin: '',
@@ -132,12 +132,12 @@ class MetadataService {
     if (!this.data.radioConfig) {
       this.data.radioConfig = {
         // Legacy RTP fields
-        targetIP: '',
+        targetIP: '185.80.51.95',
         targetPort: '8088',
         // Janus configuration with correct defaults
         janusIP: '185.80.51.95',
         janusPort: '8088',
-        janusRoomId: '',
+        janusRoomId: '3183360752998701',
         janusParticipantName: 'RadioStation',
         janusRoomSecret: '',
         janusRoomPin: '',
@@ -150,9 +150,9 @@ class MetadataService {
     } else {
       // Update existing config with new defaults if fields are missing
       const defaultConfig = {
-        janusIP: '',
+        janusIP: '185.80.51.95',
         janusPort: '8088',
-        janusRoomId: '',
+        janusRoomId: '3183360752998701',
         janusParticipantName: 'RadioStation',
         janusRoomSecret: '',
         janusRoomPin: '',

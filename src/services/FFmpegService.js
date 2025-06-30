@@ -1,15 +1,11 @@
-// src/services/FFmpegService.js - ENHANCED with Job Persistence and Recovery
-const ffmpeg = require('fluent-ffmpeg');
+// src/services/FFmpegService.js - OPTIMIZED: Direct Spawn with Resource Management
+const { spawn } = require('child_process');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffprobePath = require('@ffprobe-installer/ffprobe').path;
 const { parseFile } = require('music-metadata');
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
-
-// Configure FFmpeg paths
-ffmpeg.setFfmpegPath(ffmpegPath);
-ffmpeg.setFfprobePath(ffprobePath);
 
 class FFmpegService {
   constructor(metadataService, socketIO) {
@@ -18,22 +14,25 @@ class FFmpegService {
     this.activeJobs = new Map(); // In-memory process tracking
     this.maxConcurrent = parseInt(process.env.MAX_CONCURRENT_ENCODING) || 1;
     
-    // NEW: Reference to FileImportService (set later)
+    // Reference to FileImportService (set later)
     this.fileImportService = null;
+    
+    // Resource management for low-end VPS
+    this.isLowResourceMode = this.maxConcurrent === 1;
     
     // Initialize job recovery on startup
     this.initializeJobRecovery();
   }
 
-  // NEW: Set FileImportService reference
+  // Set FileImportService reference
   setFileImportService(fileImportService) {
     this.fileImportService = fileImportService;
   }
 
-  // NEW: Initialize job recovery on service startup
+  // Initialize job recovery on service startup
   async initializeJobRecovery() {
     try {
-      logger.info('Initializing FFmpegService with job recovery');
+      logger.info('Initializing FFmpegService with direct spawn implementation');
       
       // Check for incomplete jobs from previous session
       const incompleteJobs = await this.metadataService.getIncompleteJobs();
@@ -122,7 +121,7 @@ class FFmpegService {
         error: null
       });
 
-      // NEW: Add active job to persistent storage
+      // Add active job to persistent storage
       const outputPath = this.generateOutputPath(file);
       const activeJob = await this.metadataService.addActiveJob({
         fileId,
@@ -132,11 +131,11 @@ class FFmpegService {
         progress: 0
       });
 
-      // Extract metadata first
+      // Extract metadata first (lightweight operation)
       await this.extractMetadata(fileId, file.originalPath);
 
-      // Start encoding
-      const result = await this.performEncoding(fileId, file.originalPath, outputPath, activeJob);
+      // Start encoding with direct spawn
+      const result = await this.performDirectEncoding(fileId, file.originalPath, outputPath, activeJob);
 
       // Update file record with success
       await this.metadataService.updateFile(fileId, {
@@ -155,7 +154,7 @@ class FFmpegService {
         }
       });
 
-      // NEW: Remove from active jobs
+      // Remove from active jobs
       await this.metadataService.removeActiveJob(fileId, 'completed');
 
       // Emit success to frontend
@@ -194,7 +193,7 @@ class FFmpegService {
         }
       });
 
-      // NEW: Remove from active jobs with failure reason
+      // Remove from active jobs with failure reason
       await this.metadataService.removeActiveJob(fileId, 'failed');
 
       // Emit error to frontend
@@ -258,107 +257,142 @@ class FFmpegService {
     }
   }
 
-  // ENHANCED: Improved encoding with better job tracking
-  async performEncoding(fileId, inputPath, outputPath, activeJob) {
+  // OPTIMIZED: Direct spawn encoding (following RadioService.js pattern)
+  async performDirectEncoding(fileId, inputPath, outputPath, activeJob) {
     return new Promise((resolve, reject) => {
       const startTime = Date.now();
 
-      logger.info('Starting FFmpeg encoding', { 
+      logger.info('Starting direct FFmpeg encoding', { 
         fileId, 
         inputPath: path.basename(inputPath),
         outputPath: path.basename(outputPath)
       });
 
-      const ffmpegCommand = ffmpeg(inputPath)
-        .audioCodec(process.env.FFMPEG_OUTPUT_CODEC || 'libopus')
-        .audioFrequency(parseInt(process.env.FFMPEG_SAMPLE_RATE) || 48000)
-        .audioChannels(parseInt(process.env.FFMPEG_CHANNELS) || 2)
-        .audioBitrate(process.env.FFMPEG_BITRATE || '128k')
-        .outputOptions([
-          '-application audio',
-          '-frame_duration 20',
-          '-packet_loss 1'
-        ])
-        .on('start', async (commandLine) => {
-          logger.info('FFmpeg started', { fileId, command: commandLine });
+      // Build FFmpeg arguments for Opus encoding
+      const args = [
+        '-i', inputPath,                                    // Input file
+        '-c:a', process.env.FFMPEG_OUTPUT_CODEC || 'libopus', // Audio codec
+        '-ar', process.env.FFMPEG_SAMPLE_RATE || '48000',   // Sample rate
+        '-ac', process.env.FFMPEG_CHANNELS || '2',          // Channels
+        '-b:a', process.env.FFMPEG_BITRATE || '128k',       // Bitrate
+        '-application', 'audio',                            // Opus application type
+        '-frame_duration', '20',                            // Frame duration
+        '-packet_loss', '1',                                // Packet loss resilience
+        '-y',                                               // Overwrite output
+        outputPath                                          // Output file
+      ];
+
+      // Spawn FFmpeg process (same pattern as RadioService.js)
+      const ffmpegProcess = spawn(ffmpegPath, args);
+
+      // Store process reference for cleanup
+      this.activeJobs.set(fileId, {
+        process: ffmpegProcess,
+        startTime,
+        inputPath,
+        outputPath,
+        pid: ffmpegProcess.pid
+      });
+
+      // Handle process start
+      ffmpegProcess.on('spawn', async () => {
+        logger.info('FFmpeg process started', { 
+          fileId, 
+          pid: ffmpegProcess.pid,
+          command: `ffmpeg ${args.join(' ')}`
+        });
+
+        // Update active job with process info
+        await this.metadataService.updateActiveJob(fileId, {
+          processId: ffmpegProcess.pid,
+          status: 'running',
+          command: args.join(' ')
+        });
+
+        await this.metadataService.addLog(fileId, {
+          level: 'info',
+          message: 'FFmpeg encoding started',
+          details: { 
+            processId: ffmpegProcess.pid,
+            command: args.join(' ')
+          }
+        });
+
+        // Initial progress update
+        await this.updateProgress(fileId, 5);
+      });
+
+      // Handle stderr for progress parsing (FFmpeg outputs progress to stderr)
+      let progressData = '';
+      ffmpegProcess.stderr.on('data', async (data) => {
+        const output = data.toString();
+        progressData += output;
+
+        // Parse progress from FFmpeg stderr
+        const progressMatch = output.match(/time=(\d+):(\d+):(\d+\.\d+)/);
+        if (progressMatch) {
+          const hours = parseInt(progressMatch[1]);
+          const minutes = parseInt(progressMatch[2]);
+          const seconds = parseFloat(progressMatch[3]);
+          const currentTime = hours * 3600 + minutes * 60 + seconds;
+
+          // Estimate progress (we'll get duration from metadata)
+          const file = await this.metadataService.getFile(fileId);
+          if (file?.metadata?.duration) {
+            const percent = Math.min(95, Math.max(5, Math.floor((currentTime / file.metadata.duration) * 100)));
+            await this.updateProgress(fileId, percent);
+          }
+        }
+
+        // Log any errors or warnings
+        if (output.includes('error') || output.includes('Error')) {
+          logger.warn(`FFmpeg warning [${fileId}]:`, output.trim());
+        }
+      });
+
+      // Handle process errors
+      ffmpegProcess.on('error', async (error) => {
+        logger.error(`FFmpeg process error for file ${fileId}:`, error);
+        
+        await this.metadataService.updateActiveJob(fileId, {
+          status: 'failed',
+          endTime: new Date().toISOString(),
+          error: error.message
+        });
+        
+        reject(new Error(`FFmpeg process error: ${error.message}`));
+      });
+
+      // Handle process completion
+      ffmpegProcess.on('close', async (code, signal) => {
+        try {
+          const duration = Date.now() - startTime;
           
-          // Store process reference for potential cleanup
-          this.activeJobs.set(fileId, {
-            command: ffmpegCommand,
-            startTime,
-            inputPath,
-            outputPath,
-            pid: ffmpegCommand.ffmpegProc?.pid
+          logger.info(`FFmpeg process finished for ${fileId}`, {
+            code,
+            signal,
+            duration: `${Math.round(duration / 1000)}s`
           });
 
-          // NEW: Update active job with process info
-          await this.metadataService.updateActiveJob(fileId, {
-            processId: ffmpegCommand.ffmpegProc?.pid,
-            status: 'running',
-            command: commandLine
-          });
-
-          await this.metadataService.addLog(fileId, {
-            level: 'info',
-            message: 'FFmpeg encoding started',
-            details: { 
-              command: commandLine,
-              processId: ffmpegCommand.ffmpegProc?.pid
-            }
-          });
-
-          // Initial progress update
-          await this.metadataService.updateFile(fileId, { progress: 5 });
-          await this.metadataService.updateActiveJob(fileId, { progress: 5 });
-          
-          this.io.to('file-updates').emit('encoding-progress', {
-            fileId,
-            progress: 5
-          });
-        })
-        .on('progress', async (progress) => {
-          const percent = Math.max(5, Math.min(95, Math.floor(progress.percent || 0)));
-          
-          // Update database
-          await this.metadataService.updateFile(fileId, { progress: percent });
-          await this.metadataService.updateActiveJob(fileId, { 
-            progress: percent,
-            lastProgressUpdate: new Date().toISOString()
-          });
-          
-          // Emit real-time progress
-          this.io.to('file-updates').emit('encoding-progress', {
-            fileId,
-            progress: percent,
-            details: {
-              frames: progress.frames,
-              fps: progress.currentFps,
-              bitrate: progress.currentKbps
-            }
-          });
-
-          logger.debug('Encoding progress', { fileId, percent });
-        })
-        .on('end', async () => {
-          try {
-            const duration = Date.now() - startTime;
+          if (code === 0) {
+            // Success - check output file
             const stats = await fs.stat(outputPath);
             
             if (stats.size === 0) {
               throw new Error('Output file is empty');
             }
 
-            logger.info('FFmpeg encoding completed', {
-              fileId,
-              duration,
-              outputSize: stats.size
-            });
-
-            // NEW: Update final job status
+            // Update final job status
             await this.metadataService.updateActiveJob(fileId, {
               progress: 100,
               status: 'completed',
               endTime: new Date().toISOString(),
+              outputSize: stats.size
+            });
+
+            logger.info('FFmpeg encoding completed successfully', {
+              fileId,
+              duration,
               outputSize: stats.size
             });
 
@@ -369,14 +403,15 @@ class FFmpegService {
               outputPath
             });
 
-          } catch (error) {
-            reject(error);
+          } else if (signal === 'SIGTERM') {
+            // Cancelled by user
+            reject(new Error('Encoding was cancelled'));
+          } else {
+            // Process failed
+            throw new Error(`FFmpeg exited with code ${code}`);
           }
-        })
-        .on('error', async (error) => {
-          logger.error('FFmpeg encoding error', { fileId, error: error.message });
-          
-          // NEW: Update job status with error
+
+        } catch (error) {
           await this.metadataService.updateActiveJob(fileId, {
             status: 'failed',
             endTime: new Date().toISOString(),
@@ -384,9 +419,38 @@ class FFmpegService {
           });
           
           reject(error);
-        })
-        .save(outputPath);
+        }
+      });
+
+      // Handle unexpected exit
+      ffmpegProcess.on('exit', (code, signal) => {
+        if (code !== 0 && signal !== 'SIGTERM') {
+          logger.warn(`FFmpeg exited unexpectedly`, { 
+            fileId, 
+            code, 
+            signal 
+          });
+        }
+      });
     });
+  }
+
+  // Helper method to update progress
+  async updateProgress(fileId, percent) {
+    // Update database
+    await this.metadataService.updateFile(fileId, { progress: percent });
+    await this.metadataService.updateActiveJob(fileId, { 
+      progress: percent,
+      lastProgressUpdate: new Date().toISOString()
+    });
+    
+    // Emit real-time progress
+    this.io.to('file-updates').emit('encoding-progress', {
+      fileId,
+      progress: percent
+    });
+
+    logger.debug('Encoding progress', { fileId, percent });
   }
 
   generateOutputPath(file) {
@@ -418,17 +482,27 @@ class FFmpegService {
     return 'An unexpected error occurred during encoding. Please try again.';
   }
 
-  // ENHANCED: Better job cancellation with cleanup
+  // Enhanced job cancellation with better cleanup
   async cancelEncoding(fileId) {
     const job = this.activeJobs.get(fileId);
-    if (job && job.command) {
+    if (job && job.process) {
       logger.info('Cancelling encoding job', { fileId });
       
-      // Kill FFmpeg process
-      job.command.kill('SIGTERM');
+      // Kill FFmpeg process (same pattern as RadioService.js)
+      job.process.removeAllListeners();
+      job.process.kill('SIGTERM');
+      
+      // Force kill after timeout
+      setTimeout(() => {
+        if (job.process && !job.process.killed) {
+          logger.warn('Force killing FFmpeg process', { fileId });
+          job.process.kill('SIGKILL');
+        }
+      }, 5000);
+      
       this.activeJobs.delete(fileId);
       
-      // NEW: Update persistent job status
+      // Update persistent job status
       await this.metadataService.updateActiveJob(fileId, {
         status: 'cancelled',
         endTime: new Date().toISOString()
@@ -448,7 +522,7 @@ class FFmpegService {
         message: 'Encoding cancelled by user'
       });
 
-      // NEW: Remove from active jobs
+      // Remove from active jobs
       await this.metadataService.removeActiveJob(fileId, 'cancelled');
 
       this.io.to('file-updates').emit('encoding-cancelled', { fileId });
@@ -460,13 +534,14 @@ class FFmpegService {
     return false;
   }
 
-  // ENHANCED: Get active jobs with persistent data
+  // Get active jobs with persistent data
   async getActiveJobs() {
     const memoryJobs = Array.from(this.activeJobs.entries()).map(([fileId, job]) => ({
       fileId,
       inputPath: job.inputPath,
       outputPath: job.outputPath,
-      duration: Date.now() - job.startTime
+      duration: Date.now() - job.startTime,
+      pid: job.pid
     }));
 
     const persistentJobs = await this.metadataService.getActiveJobs();
@@ -511,7 +586,12 @@ class FFmpegService {
     return this.encodeFile(fileId);
   }
 
-  // NEW: Cleanup method for graceful shutdown
+  // Check if encoding is currently active (for resource management)
+  isEncodingActive() {
+    return this.activeJobs.size > 0;
+  }
+
+  // Cleanup method for graceful shutdown
   async cleanup() {
     logger.info('Cleaning up FFmpegService');
     
@@ -532,7 +612,7 @@ class FFmpegService {
     logger.info('FFmpegService cleanup completed');
   }
 
-  // NEW: Health check method
+  // Health check method
   async healthCheck() {
     const activeJobs = await this.getActiveJobs();
     const memoryJobs = this.activeJobs.size;
@@ -541,11 +621,13 @@ class FFmpegService {
     return {
       service: 'FFmpegService',
       status: 'healthy',
+      implementation: 'direct-spawn',
       activeJobs: activeJobs.length,
       memoryJobs,
       persistentJobs: persistentJobs.length,
       maxConcurrent: this.maxConcurrent,
-      capacityUsed: Math.round((activeJobs.length / this.maxConcurrent) * 100)
+      capacityUsed: Math.round((activeJobs.length / this.maxConcurrent) * 100),
+      lowResourceMode: this.isLowResourceMode
     };
   }
 }
