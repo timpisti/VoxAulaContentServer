@@ -1,6 +1,6 @@
 # VoxAula Radio Station Service
 
-A modern, containerized webradio podcast station streaming service built with Node.js and Angular. This application provides automated audio file processing, real-time streaming to VoxAula.com, and a comprehensive web-based administration interface. This docker image can run parallely multiple instances in same server to be able to handle multiple shows.
+A modern, containerized webradio podcast station streaming service built with Node.js and Angular. This application provides automated audio file processing, real-time streaming to VoxAula.com, and a comprehensive web-based administration interface. This docker image can run parallely multiple instances in same server to be able to handle multiple shows. One 24/7 show use ~ 15% performance of a single core, a cheap low-end VPS can serve 4-5 continous shows concurrently.
 
 ## 🎵 Features
 
@@ -69,7 +69,7 @@ A modern, containerized webradio podcast station streaming service built with No
 ### Backend
 - **Runtime**: Node.js 18+
 - **Framework**: Express.js with Socket.IO
-- **Audio Processing**: FFmpeg with fluent-ffmpeg
+- **Audio Processing**: FFmpeg (removed fluent-ffmpeg)
 - **Streaming**: VoxAula server (Janus Gateway)
 - **Database**: LowDB (JSON file-based)
 - **Logging**: Winston
@@ -128,7 +128,27 @@ npm run dev
 
 ### Production Deployment
 
+1. **mmlti-Deploy with Docker Compose**:
+
+```bash
+# Start multiploe production environment with the list of needed ports like: 3400 3600 3800
+./multi-deploy.sh [...port] [...port] [...]
+```
+
+2. **Check deployment status**:
+```bash
+./multi-deploy.sh [port] status
+```
+
+3. **View logs**:
+```bash
+./deploy.sh [port] logs
+```
+
+Or
+
 1. **Deploy with Docker Compose**:
+
 ```bash
 # Start production environment
 ./deploy.sh production deploy
@@ -626,13 +646,14 @@ For support and questions:
 
 ## 🗺️ Roadmap
 
-- [ ] Automatic /reencoded directory scan and DB import
+- [x] Automatic /reencoded directory scan and DB import
 - [ ] Legal document upload for media files
+- [ ] Integrated VoxAula Auth
 
 ---
 
-**Version**: 1.0.0  
-**Last Updated**: 2024  
+**Version**: 1.2.0  
+**Last Updated**: 2025  
 **Node.js**: 18+  
 **Angular**: 19+  
 **Docker**: Required for deployment
